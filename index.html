@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mi Portal</title>
+  <style>
+    html,body { margin:0; width:100%; height:100%; overflow:hidden; background:#f3f4f6; font:16px system-ui,sans-serif; }
+    iframe { display:block; width:100%; height:100vh; height:100dvh; border:0; }
+    #cargando,#rescate { position:fixed; inset:40% 1rem auto; text-align:center; background:#f3f4f6; padding:1rem; }
+    #rescate { inset:auto 1rem 1rem; }
+  </style>
+</head>
+<body>
+  <div id="cargando" role="status">Cargando Mi Portal…</div>
+  <iframe id="portal" title="Mi Portal" allow="clipboard-write"></iframe>
+  <div id="rescate" hidden><a id="directo">Abrir Mi Portal directo</a></div>
+  <script>
+  (() => {
+    const EXEC = 'https://script.google.com/macros/s/AKfycby8EIYLwdY_CNIexvivLu8pHWY66l4Pf2xs0V5_ixnV3lzmP46rwU8t8hxMnKY21BQZ/exec';
+    const ORIGEN_PORTAL = 'https://n-rngg4if3sv4xjxxzptm77bejqnqjeig4uhsckgq-0lu-script.googleusercontent.com';
+    const portal = document.getElementById('portal');
+    const hex = s => typeof s === 'string' && /^[0-9a-f]{64}$/.test(s);
+    const leer = (almacen, k) => { try { return window[almacen].getItem(k); } catch (_) { return null; } };
+    const borrar = (almacen, k) => { try { window[almacen].removeItem(k); } catch (_) {} };
+    const guardar = (almacen, k, v) => { try { window[almacen].setItem(k, v); return window[almacen].getItem(k) === v; } catch (_) { return false; } };
+    const params = new URLSearchParams(location.search);
+    let vuelta = null;
+    if ((params.has('code') && params.has('state')) || params.has('error')) {
+      const state = (params.get('state') || '').slice(0, 128);
+      vuelta = { state, code: (params.get('code') || '').slice(0, 512), error: params.has('error') };
+      history.replaceState(null, '', '/');
+      if (hex(state)) {
+        const clave = 'mp_nav_' + state, raw = leer('localStorage', clave);
+        borrar('localStorage', clave);
+        try {
+          const nav = JSON.parse(raw);
+          if (nav && hex(nav.secreto) && typeof nav.t === 'number' && Date.now() - nav.t >= 0 && Date.now() - nav.t < 600000) {
+            vuelta.secreto = nav.secreto; vuelta.recordar = nav.recordar === true;
+          }
+        } catch (_) {}
+      }
+    }
+    // Un origen correcto no basta: debe pertenecer al árbol de nuestro iframe.
+    const dentro = source => {
+      try {
+        for (let i = 0; source && source !== window && i < 4; i++, source = source.parent) {
+          if (source === portal.contentWindow) return true;
+        }
+      } catch (_) {}
+      return false;
+    };
+    let respondio = false;
+    const reloj = setTimeout(() => { if (!respondio) document.getElementById('rescate').hidden = false; }, 25000);
+    window.addEventListener('message', event => {
+      if (event.origin !== ORIGEN_PORTAL || !dentro(event.source) || !event.data) return;
+      const m = event.data;
+      const responder = datos => event.source.postMessage(datos, event.origin);
+      if (m.mp === 'hola') {
+        respondio = true; clearTimeout(reloj); document.getElementById('cargando').hidden = true;
+        const sesion = leer('sessionStorage', 'mp_ses') || leer('localStorage', 'mp_ses');
+        responder({ mp: 'estado', sesion: hex(sesion) ? sesion : null, hint: leer('localStorage', 'mp_hint') || '', vuelta });
+        vuelta = null;
+      } else if (m.mp === 'nav' && hex(m.state) && hex(m.secreto) && typeof m.recordar === 'boolean') {
+        const clave = 'mp_nav_' + m.state;
+        let previo = null;
+        try { previo = JSON.parse(leer('localStorage', clave)); } catch (_) {}
+        // Actualizar Mantener no renueva los diez minutos del secreto.
+        const t = previo && previo.secreto === m.secreto ? previo.t : Date.now();
+        if (guardar('localStorage', clave, JSON.stringify({ secreto: m.secreto, recordar: m.recordar, t }))) responder({ mp: 'navOk', state: m.state });
+      } else if (m.mp === 'sesion' && hex(m.sesion)) {
+        if (typeof m.recordar === 'boolean') {
+          const destino = m.recordar ? 'localStorage' : 'sessionStorage';
+          if (guardar(destino, 'mp_ses', m.sesion)) borrar(m.recordar ? 'sessionStorage' : 'localStorage', 'mp_ses');
+        }
+        if (typeof m.correo === 'string' && m.correo.length <= 254) guardar('localStorage', 'mp_hint', m.correo);
+      } else if (m.mp === 'salir') {
+        borrar('localStorage', 'mp_ses'); borrar('sessionStorage', 'mp_ses');
+      }
+    });
+    document.getElementById('directo').href = EXEC;
+    portal.src = EXEC + '?shell=1';
+  })();
+  </script>
+</body>
+</html>
